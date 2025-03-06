@@ -1,10 +1,14 @@
 import os
+
+# Set the log level to suppress INFO and DEBUG messages
+os.environ['GLOG_minloglevel'] = '2'
 import json
 import google.generativeai as genai
 
 # Load existing patterns and rulebook
 PATTERNS_FILE = "patterns.json"
 RULEBOOK_FILE = ".\\features\\features.json"
+SURICATA_RULES_FILE = r"C:\Users\SEC\Desktop\GIT HUB\BOLT\IOT_BOTNET_Detection\IOT_BOTNET_Detection\sureketa_rule_book\rulebook\suricata.rules"
 
 # Load JSON files
 def load_json(file_path):
@@ -79,38 +83,48 @@ model = genai.GenerativeModel(
 )
 
 # Function to find a matching pattern
-def find_matching_pattern(packet_data):
-    print("Type of packet_data:", type(packet_data))
-    print("Packet Data Content:", packet_data)
+import random
 
+def find_matching_pattern(packet_data):
     # Check if the packet_data is in string format and load if needed
     if isinstance(packet_data, str):  # If it's a JSON string, convert it
         packet_data = json.loads(packet_data)
 
-    # Loop through patterns and find a match (with more flexibility)
-    for pattern in patterns:
-        print(f"Matching {packet_data} with {pattern}")
+    # Randomize the number of iterations (between 1 and 50)
+    max_iterations = random.randint(1, 50)
 
+    # Loop through patterns and find a match, with a random stopping condition
+    for i in range(max_iterations):
         # Check if there's a match on protocol, or if protocol is unspecified
-        protocol_match = packet_data["protocol"] == pattern["protocol"] or pattern["protocol"] == "ip"
+        for pattern in patterns:
+            protocol_match = packet_data["protocol"] == pattern["protocol"] or pattern["protocol"] == "ip"
+            ip_match = packet_data["src_ip"] == pattern["src_ip"] or packet_data["dest_ip"] == pattern["dest_ip"]
+            content_match = packet_data["content"] == pattern["content"]
 
-        # Check if source and destination IPs match
-        ip_match = packet_data["src_ip"] == pattern["src_ip"] or packet_data["dest_ip"] == pattern["dest_ip"]
+            if protocol_match and ip_match and content_match:
+                return pattern  # Return the first match found
 
-        # Check if content matches
-        content_match = packet_data["content"] == pattern["content"]
+    return None  # No match found
 
-        if protocol_match and ip_match and content_match:
-            return pattern
-    
-    return None # No match found
 
 # Function to check if the rule already exists
 def rule_exists(new_rule):
+    # Convert the new_rule to a string in case it's not already
+    if isinstance(new_rule, dict):
+        new_rule = str(new_rule)
+
     for rule in rulebook.get("rules", []):
+        # Make sure the rule is also a string for comparison
+        if isinstance(rule, dict):
+            rule = str(rule)
+
         if new_rule.strip() == rule.strip():
             return True
     return False
+
+def write_to_suricata_rules(rule):
+    with open(SURICATA_RULES_FILE, "a") as f:
+        f.write(rule + "\n")
 
 # Function to generate or modify a rule
 def generate_rule(packet_data):
@@ -127,34 +141,44 @@ def generate_rule(packet_data):
     
     # Generate rule using Gemini AI
     response = model.generate_content(user_input)
-    generated_rule = response.text.strip()
+
+    # Extract the generated Suricata rule text
+    if isinstance(response, dict) and 'text' in response:
+        generated_rule = response.result.candidates[0].content.parts[0].text.strip()
+    else:
+        generated_rule = str(response).strip()  # Handle unexpected response format
 
     # Check if the rule already exists in the rulebook
     if rule_exists(generated_rule):
-        print("Rule already exists in rulebook.")
         return generated_rule
 
     # Save new rule to rulebook
     rulebook.setdefault("rules", []).append(generated_rule)
     with open(RULEBOOK_FILE, "w") as f:
         json.dump(rulebook, f, indent=2)
-    
-    print("New rule added to rulebook.")
+
     return generated_rule
+
 
 # Example packet from botnet detection
 flagged_packet = {
-    "sid": "20002",
-    "src_ip": "10.0.0.50",
-    "src_port": "443",
-    "dest_ip": "192.168.1.10",
-    "dest_port": "80",
-    "protocol": "tcp",
-    "content": "new_malicious_payload",
-    "timestamp": "2025-02-02T15:10:00Z",
-    "alert_type": "alert"
+  "sid": "20002",
+  "src_ip": "10.0.0.50",
+  "src_port": "443",
+  "dest_ip": "192.168.1.10",
+  "dest_port": "80",
+  "protocol": "tcp",
+  "content": "malicious_payload",
+  "timestamp": "2025-02-02T15:10:00Z",
+  "alert_type": "alert"
 }
 
 # Generate rule based on flagged packet
 new_rule = generate_rule(flagged_packet)
-print("\nGenerated Suricata Rule:\n", new_rule)
+
+# Construct alert message
+alert_message = f"alert {flagged_packet['protocol']} {flagged_packet['src_ip']} {flagged_packet['src_port']} -> {flagged_packet['dest_ip']} {flagged_packet['dest_port']} (msg:\"Botnet Traffic Detected\"; content:\"{flagged_packet['content']}\"; sid:{flagged_packet['sid']})"
+
+write_to_suricata_rules(alert_message)
+# Output the generated rule and the alert message
+print(alert_message)
