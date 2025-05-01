@@ -8,8 +8,7 @@ import google.generativeai as genai
 # Load existing patterns and rulebook
 PATTERNS_FILE = "patterns.json"
 RULEBOOK_FILE = ".\\features\\features.json"
-SURICATA_RULES_FILE = r"C:\Users\SEC\Desktop\GIT HUB\BOLT\IOT_BOTNET_Detection\IOT_BOTNET_Detection\sureketa_rule_book\rulebook\suricata.rules"
-
+SURICATA_RULES_FILE = ".\\rulebook\\suricata.rules"
 # Load JSON files
 def load_json(file_path):
     if os.path.exists(file_path):
